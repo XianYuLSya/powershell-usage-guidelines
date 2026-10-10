@@ -317,10 +317,22 @@ $facts.pathHazards = $pathHazards
 if ($ScanPath) {
     Write-Verbose ('Scanning {0} for non-ASCII scripts without BOM...' -f $ScanPath)
     $risky = @()
+    $scriptCount = 0
     if (Test-Path -LiteralPath $ScanPath) {
-        $candidates = Get-ChildItem -LiteralPath $ScanPath -Recurse -File -Include *.ps1, *.psm1 -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch '\\node_modules\\' }
+        # Do NOT filter with -Include here. In Windows PowerShell 5.1, -Include is
+        # SILENTLY IGNORED when it is combined with -LiteralPath: -Include needs a
+        # wildcard in the -Path, and -LiteralPath forbids wildcards, so the filter
+        # is dropped with no error or warning. Measured on a real repository:
+        #   Get-ChildItem -LiteralPath X -Recurse -File -Include *.ps1,*.psm1  -> 6916 files
+        #   ... -Recurse -File | Where-Object Extension -in '.ps1','.psm1'    ->   47 files
+        # The -Include form returned 6869 non-PowerShell files (markdown, npm
+        # cache blobs, images) and reported every one of them as a scan result.
+        # Filter by Extension instead, and skip dependancy/runtime trees.
+        $skipRegex = '\\(node_modules|_cacache|npm-cache|bower_components|\.git|\.venv|site-packages)\\'
+        $candidates = @(Get-ChildItem -LiteralPath $ScanPath -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.ps1', '.psm1') -and $_.FullName -notmatch $skipRegex })
         foreach ($file in $candidates) {
+            $scriptCount++
             $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
             $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
             $hasNonAscii = $false
@@ -329,6 +341,7 @@ if ($ScanPath) {
         }
     }
     $facts.scanPath = $ScanPath
+    $facts.scanScriptCount = $scriptCount
     $facts.scanRiskyCount = $risky.Count
     $facts.scanRiskyFiles = @($risky)
 }
@@ -375,6 +388,7 @@ Write-Output ('  note                       : {0}' -f $pathHazards.note)
 if ($ScanPath) {
     Write-Output ''
     Write-Output ('Scan of {0}' -f $ScanPath)
+    Write-Output ('  PowerShell files examined      : {0}' -f $facts.scanScriptCount)
     Write-Output ('  non-ASCII scripts without BOM : {0}' -f $facts.scanRiskyCount)
     foreach ($f in $facts.scanRiskyFiles) { Write-Output ('    {0}' -f $f) }
 }

@@ -127,6 +127,28 @@ are three different things governing three different hops. Setting one and
 observing no change is expected, not mysterious. Change one thing at a time and
 re-measure.
 
+### A cmdlet parameter silently does nothing
+
+Look at: **whether the parameter you passed is actually compatible with the path
+parameter you passed alongside it**. Some filters are not honoured in every
+combination, and the cmdlet reports no error and no warning - it simply returns
+a different set than you asked for.
+
+The case worth remembering: `-Include` needs a wildcard in `-Path`. Pair it with
+`-LiteralPath` and the filter is dropped. Measured on one real repository:
+
+```powershell
+Get-ChildItem -LiteralPath X -Recurse -File -Include *.ps1,*.psm1   # 6916 files
+Get-ChildItem -LiteralPath X -Recurse -File | Where-Object { ... }  #   47 files
+```
+
+6916 files, 6869 of which were not PowerShell scripts at all. Anything downstream
+then reads every markdown file and binary blob in the tree and reports them as
+findings, with no hint that the filter never ran.
+
+The defence is not to memorise the quirk. It is to **count what came back and
+compare it against an independent count**. A filter that returns more rows than
+exist has already told you it did not run.
 ## Writing scripts that survive
 
 1. Prefer ASCII-only script sources. It removes an entire failure class for
